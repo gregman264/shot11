@@ -1,0 +1,43 @@
+name: Build iOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer XcodeGen
+        run: brew install xcodegen
+
+      - name: Générer le projet Xcode
+        run: xcodegen generate
+
+      - name: Compiler (sans signature)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Shot11.xcodeproj \
+            -scheme Shot11 \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tail -n 60
+
+      - name: Fabriquer le fichier .ipa
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/Shot11.app Payload/
+          zip -qr Shot11.ipa Payload
+
+      - name: Publier le .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shot11-ipa
+          path: Shot11.ipa

@@ -1,0 +1,29 @@
+name: Shot11
+options:
+  bundleIdPrefix: com.shot11
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  Shot11:
+    type: application
+    platform: iOS
+    sources:
+      - Shot11
+    info:
+      path: Shot11/Info.plist
+      properties:
+        CFBundleDisplayName: Shot11
+        UILaunchScreen: {}
+        NSCameraUsageDescription: "Shot11 utilise la caméra pour photographier tes vêtements. Les photos restent sur ton iPhone."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiresFullScreen: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shot11.app
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
