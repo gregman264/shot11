@@ -6,38 +6,64 @@ struct AdjustView: View {
     @State private var dragBase: CropBox? = nil
     @State private var pinchBase: CGFloat? = nil
 
+    private var isAuto: Bool { store.defs[idx].auto }
+
     var body: some View {
         GeometryReader { geo in
-            let side = max(200, min(geo.size.width - 28, geo.size.height - 270))
+            let extra: CGFloat = (idx == 0) ? 50 : 0
+            let side = max(200, min(geo.size.width - 28, geo.size.height - 290 - extra))
             VStack(spacing: 0) {
-                TopBar(number: idx + 1, title: "Cadrage · " + Steps.all[idx].title, ref: store.ref)
+                TopBar(number: idx + 1, title: "Cadrage · " + store.defs[idx].title, ref: store.ref)
                 stage(side: side)
                     .padding(.top, 6)
-                Text(idx == 0 ? "Déplace le cadre, pince pour zoomer. Les 4 zooms de coin en seront tirés."
-                              : "Déplace le cadre, pince pour zoomer.")
+                Text(helpText)
                     .font(.system(size: 15, design: .rounded))
                     .foregroundColor(Theme.muted)
                     .multilineTextAlignment(.center)
                     .frame(height: 44)
                     .padding(.horizontal, 20)
                 sizeSlider
-                Spacer(minLength: 0)
-                HStack(spacing: 10) {
-                    Button("Refaire") { store.retake(idx) }
-                        .buttonStyle(PrimaryButton(ghost: true))
-                    Button("Valider") { store.validateAdjust(idx) }
-                        .buttonStyle(PrimaryButton())
-                        .disabled(store.busy)
+                if idx == 0 {
+                    Toggle(isOn: $store.regenZooms) {
+                        Text("Recalculer les 4 zooms de coin")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundColor(Theme.fg)
+                    }
+                    .tint(Theme.accent)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
                 }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+                Spacer(minLength: 0)
+                buttons
             }
             .frame(maxWidth: .infinity)
         }
     }
 
+    private var helpText: String {
+        if isAuto { return "Ce zoom se recadre seul : déplace le cadre, pince pour zoomer." }
+        if idx == 0 { return "Déplace le cadre, pince pour zoomer. Les 4 zooms de coin en seront tirés." }
+        return "Déplace le cadre, pince pour zoomer."
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 8) {
+            Button("Annuler") { store.cancelAdjust() }
+                .buttonStyle(PrimaryButton(ghost: true))
+            if !isAuto {
+                Button("Refaire") { store.retake(idx) }
+                    .buttonStyle(PrimaryButton(ghost: true))
+            }
+            Button("Valider") { store.validateAdjust(idx) }
+                .buttonStyle(PrimaryButton())
+                .disabled(store.busy)
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    }
+
     private func stage(side: CGFloat) -> some View {
-        let src = store.sources[idx]
+        let src = store.sources[store.srcIndex(idx)]
         let S: CGFloat = src?.size.width ?? 1
         let k = side / S
         let b = store.adjustBox
@@ -83,7 +109,7 @@ struct AdjustView: View {
     }
 
     private var sizeSlider: some View {
-        let S: CGFloat = store.sources[idx]?.size.width ?? 1
+        let S: CGFloat = store.sources[store.srcIndex(idx)]?.size.width ?? 1
         let binding = Binding<Double>(
             get: { Double(store.adjustBox.side / S) },
             set: { store.setSide(S * CGFloat($0), S: S) }
@@ -94,6 +120,9 @@ struct AdjustView: View {
                 .foregroundColor(Theme.muted)
             Slider(value: binding, in: 0.2...1.0)
                 .tint(Theme.accent)
+            Button("Auto") { store.resetBox(idx) }
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(Theme.accent)
         }
         .padding(.horizontal, 18)
         .padding(.top, 8)

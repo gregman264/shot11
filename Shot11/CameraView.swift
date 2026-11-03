@@ -1,13 +1,20 @@
 import SwiftUI
 
 struct Silhouette: Shape {
+    var kind: Int   // 1 = haut, 2 = pantalon
+
     func path(in r: CGRect) -> Path {
-        let pts: [CGPoint] = [
+        let top: [CGPoint] = [
             CGPoint(x: 38, y: 17), CGPoint(x: 62, y: 17), CGPoint(x: 64, y: 24), CGPoint(x: 76, y: 28),
             CGPoint(x: 93, y: 53), CGPoint(x: 86, y: 71), CGPoint(x: 74, y: 65), CGPoint(x: 72, y: 55),
             CGPoint(x: 70, y: 83), CGPoint(x: 30, y: 83), CGPoint(x: 28, y: 55), CGPoint(x: 26, y: 65),
             CGPoint(x: 14, y: 71), CGPoint(x: 7, y: 53), CGPoint(x: 24, y: 28), CGPoint(x: 36, y: 24)
         ]
+        let bottom: [CGPoint] = [
+            CGPoint(x: 31, y: 8), CGPoint(x: 69, y: 8), CGPoint(x: 73, y: 92), CGPoint(x: 53, y: 92),
+            CGPoint(x: 50, y: 40), CGPoint(x: 47, y: 92), CGPoint(x: 27, y: 92)
+        ]
+        let pts = (kind == 2) ? bottom : top
         var p = Path()
         for (i, pt) in pts.enumerated() {
             let q = CGPoint(x: r.minX + pt.x / 100 * r.width, y: r.minY + pt.y / 100 * r.height)
@@ -19,7 +26,7 @@ struct Silhouette: Shape {
 }
 
 struct Guides: View {
-    let silhouette: Bool
+    let silhouette: Int
 
     var body: some View {
         GeometryReader { g in
@@ -35,8 +42,8 @@ struct Guides: View {
                     p.addLine(to: CGPoint(x: s * 0.56, y: s / 2))
                 }
                 .stroke(Color.white.opacity(0.8), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                if silhouette {
-                    Silhouette()
+                if silhouette > 0 {
+                    Silhouette(kind: silhouette)
                         .stroke(Color.white.opacity(0.85), style: StrokeStyle(lineWidth: 2, lineJoin: .round, dash: [7, 5]))
                 }
             }
@@ -51,15 +58,18 @@ struct CameraView: View {
     @State private var hintMode = 0      // 0 = plein, 1 = discret, 2 = caché
     @State private var flashOn = false
     @State private var hintWork: DispatchWorkItem?
+    @State private var focusPt: CGPoint? = nil
+    @State private var focusWork: DispatchWorkItem?
+    @State private var pinchBase: CGFloat = 1
 
     var body: some View {
         GeometryReader { geo in
             let side = max(200, min(geo.size.width - 28, geo.size.height - 300))
             VStack(spacing: 0) {
-                TopBar(number: store.step + 1, title: Steps.all[store.step].title, ref: store.ref)
+                TopBar(number: store.step + 1, title: store.defs[store.step].title, ref: store.ref)
                 viewfinder(side: side)
                     .padding(.top, 6)
-                Text(Steps.all[store.step].caption)
+                Text(store.defs[store.step].caption)
                     .font(.system(size: 15, design: .rounded))
                     .foregroundColor(Theme.muted)
                     .multilineTextAlignment(.center)
@@ -72,32 +82,52 @@ struct CameraView: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .onAppear { showHint() }
-        .onChange(of: store.step) { _ in showHint() }
+        .onAppear { stepChanged() }
+        .onChange(of: store.step) { _ in stepChanged() }
     }
 
     // MARK: Viseur
 
     private func viewfinder(side: CGFloat) -> some View {
-        let def = Steps.all[store.step]
+        let def = store.defs[store.step]
         return ZStack {
             Color.black
-            CameraPreview(session: cam.session)
+            CameraPreview(session: cam.session,
+                          onTap: { dev, pt in tapFocus(dev, pt) },
+                          onPinch: { scale, state in pinch(scale, state) })
             Guides(silhouette: def.silhouette)
             hintView(def)
+            focusRing
             Color.white.opacity(flashOn ? 0.85 : 0).allowsHitTesting(false)
             if !cam.authorized { deniedView }
-            VStack {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    wbBadge
+                    VStack(alignment: .leading, spacing: 6) {
+                        wbBadge
+                        if cam.focusLocked { focusBadge }
+                    }
                     Spacer()
                 }
                 Spacer()
+                zoomBar
             }
             .padding(10)
         }
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var focusRing: some View {
+        ZStack {
+            if let p = focusPt {
+                Rectangle()
+                    .stroke(Color.yellow, lineWidth: 1.5)
+                    .frame(width: 72, height: 72)
+                    .position(x: p.x, y: p.y)
+                    .transition(.opacity)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     private var wbBadge: some View {
@@ -116,6 +146,41 @@ struct CameraView: View {
             .background(Color.black.opacity(0.55))
             .clipShape(Capsule())
         }
+    }
+
+    private var focusBadge: some View {
+        Button {
+            cam.resetFocus()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "scope")
+                Text("Netteté fixée · toucher = auto")
+            }
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.55))
+            .clipShape(Capsule())
+        }
+    }
+
+    private var zoomBar: some View {
+        HStack(spacing: 8) {
+            ForEach([1, 2, 3], id: \.self) { z in
+                Button {
+                    cam.setZoom(CGFloat(z), animated: true)
+                } label: {
+                    Text("\(z)×")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(Int(cam.zoom.rounded()) == z ? Color.black : Color.white)
+                        .frame(width: 44, height: 32)
+                        .background(Int(cam.zoom.rounded()) == z ? Color.yellow : Color.black.opacity(0.55))
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func hintView(_ def: StepDef) -> some View {
@@ -168,7 +233,7 @@ struct CameraView: View {
             .disabled(store.busy || !cam.running)
             .opacity((store.busy || !cam.running) ? 0.4 : 1)
             Spacer()
-            sideButton(title: "Récap", symbol: "square.grid.2x2") { store.goRecap() }
+            sideButton(title: "Article", symbol: "square.grid.2x2") { store.goRecap() }
         }
         .padding(.horizontal, 10)
         .padding(.top, 4)
@@ -206,7 +271,7 @@ struct CameraView: View {
                         RoundedRectangle(cornerRadius: 5)
                             .stroke(i == store.step ? Theme.accent : Color.clear, lineWidth: 2)
                     )
-                    .opacity((Steps.all[i].auto && store.thumbs[i] == nil) ? 0.45 : 1)
+                    .opacity((store.defs[i].auto && store.thumbs[i] == nil) ? 0.45 : 1)
                 }
                 .buttonStyle(.plain)
             }
@@ -215,6 +280,30 @@ struct CameraView: View {
     }
 
     // MARK: Actions
+
+    private func tapFocus(_ dev: CGPoint, _ pt: CGPoint) {
+        cam.focus(at: dev)
+        focusWork?.cancel()
+        withAnimation(.easeOut(duration: 0.15)) { focusPt = pt }
+        let w = DispatchWorkItem {
+            withAnimation(.easeOut(duration: 0.4)) { focusPt = nil }
+        }
+        focusWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: w)
+    }
+
+    private func pinch(_ scale: CGFloat, _ state: UIGestureRecognizer.State) {
+        if state == .began { pinchBase = cam.zoom }
+        if state == .began || state == .changed {
+            cam.setZoom(pinchBase * scale, animated: false)
+        }
+    }
+
+    private func stepChanged() {
+        cam.setZoom(1, animated: false)
+        cam.resetFocus()
+        showHint()
+    }
 
     private func shoot() {
         if store.busy { return }

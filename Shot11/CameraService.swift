@@ -18,6 +18,8 @@ final class CameraService: NSObject, ObservableObject {
     @Published var authorized = true
     @Published var running = false
     @Published var whiteBalanceLocked = false
+    @Published var zoom: CGFloat = 1
+    @Published var focusLocked = false
 
     // MARK: Démarrage / arrêt
 
@@ -72,9 +74,60 @@ final class CameraService: NSObject, ObservableObject {
             if dev.isFocusModeSupported(.continuousAutoFocus) {
                 dev.focusMode = .continuousAutoFocus
             }
+            if dev.isAutoFocusRangeRestrictionSupported {
+                dev.autoFocusRangeRestriction = .none
+            }
             dev.unlockForConfiguration()
         } catch {}
         configured = true
+    }
+
+    // MARK: Mise au point et zoom
+
+    /// Mise au point sur un point touché (coordonnées caméra 0...1). Reste fixée jusqu'au prochain changement.
+    func focus(at p: CGPoint) {
+        queue.async {
+            guard let d = self.device else { return }
+            do {
+                try d.lockForConfiguration()
+                if d.isFocusPointOfInterestSupported { d.focusPointOfInterest = p }
+                if d.isFocusModeSupported(.autoFocus) { d.focusMode = .autoFocus }
+                d.unlockForConfiguration()
+                DispatchQueue.main.async { self.focusLocked = true }
+            } catch {}
+        }
+    }
+
+    /// Retour à la mise au point automatique continue.
+    func resetFocus() {
+        queue.async {
+            guard let d = self.device else { return }
+            do {
+                try d.lockForConfiguration()
+                if d.isFocusPointOfInterestSupported { d.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5) }
+                if d.isFocusModeSupported(.continuousAutoFocus) { d.focusMode = .continuousAutoFocus }
+                d.unlockForConfiguration()
+            } catch {}
+            DispatchQueue.main.async { self.focusLocked = false }
+        }
+    }
+
+    func setZoom(_ f: CGFloat, animated: Bool) {
+        queue.async {
+            guard let d = self.device else { return }
+            let maxZ = min(d.activeFormat.videoMaxZoomFactor, 6)
+            let z = min(max(f, 1), maxZ)
+            do {
+                try d.lockForConfiguration()
+                if animated {
+                    d.ramp(toVideoZoomFactor: z, withRate: 8)
+                } else {
+                    d.videoZoomFactor = z
+                }
+                d.unlockForConfiguration()
+            } catch {}
+            DispatchQueue.main.async { self.zoom = z }
+        }
     }
 
     // MARK: Balance des blancs
@@ -105,7 +158,6 @@ final class CameraService: NSObject, ObservableObject {
         guard let d = device else { return }
         let g = clamped(d.deviceWhiteBalanceGains, d)
         lockedGains = g
-        UserDefaults.standard.set([g.redGain, g.greenGain, g.blueGain], forKey: "wbGains")
         setLocked(g, d, then: nil)
     }
 
@@ -132,7 +184,6 @@ final class CameraService: NSObject, ObservableObject {
             guard let d = self.device else { return }
             self.lockedGains = nil
             self.calibrating = true
-            UserDefaults.standard.removeObject(forKey: "wbGains")
             DispatchQueue.main.async { self.whiteBalanceLocked = false }
             do {
                 try d.lockForConfiguration()
@@ -145,11 +196,24 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    /// Reprise d'un article en cours : on remet exactement les mêmes gains.
-    func restoreSavedGains() {
-        guard let a = UserDefaults.standard.array(forKey: "wbGains") as? [Float], a.count == 3 else { return }
+    /// Impose des gains connus (ceux déjà utilisés pour les photos d'un article).
+    func useGains(_ a: [Float]) {
+        if a.count != 3 { return }
         queue.async {
-            self.lockedGains = AVCaptureDevice.WhiteBalanceGains(redGain: a[0], greenGain: a[1], blueGain: a[2])
+            let g = AVCaptureDevice.WhiteBalanceGains(redGain: a[0], greenGain: a[1], blueGain: a[2])
+            self.lockedGains = g
+            self.calibrating = false
+            if let d = self.device, self.session.isRunning {
+                self.setLocked(g, d, then: nil)
+            }
+        }
+    }
+
+    /// Gains actuellement verrouillés (pour les enregistrer avec l'article).
+    func currentGains() -> [Float]? {
+        return queue.sync { () -> [Float]? in
+            guard let g = self.lockedGains else { return nil }
+            return [g.redGain, g.greenGain, g.blueGain]
         }
     }
 
@@ -185,23 +249,52 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
     }
 }
 
-// MARK: Aperçu
+// MARK: Aperçu (touche = mise au point, pincement = zoom)
 
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    var onTap: ((CGPoint, CGPoint) -> Void)?
+    var onPinch: ((CGFloat, UIGestureRecognizer.State) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped(_:))))
+        addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    @objc private func tapped(_ g: UITapGestureRecognizer) {
+        let p = g.location(in: self)
+        let dp = previewLayer.captureDevicePointConverted(fromLayerPoint: p)
+        onTap?(dp, p)
+    }
+
+    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
+        onPinch?(g.scale, g.state)
+    }
 }
 
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    var onTap: (CGPoint, CGPoint) -> Void
+    var onPinch: (CGFloat, UIGestureRecognizer.State) -> Void
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
         v.backgroundColor = .black
         v.previewLayer.session = session
         v.previewLayer.videoGravity = .resizeAspectFill
+        v.onTap = onTap
+        v.onPinch = onPinch
         return v
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        uiView.onTap = onTap
+        uiView.onPinch = onPinch
+    }
 }

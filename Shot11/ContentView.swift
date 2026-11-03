@@ -12,6 +12,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .onChange(of: store.screen) { s in
+            if s == .camera, let wb = store.current?.wb { cam.useGains(wb) }
             if s.usesCamera { cam.start() } else { cam.stop() }
         }
     }
@@ -19,6 +20,8 @@ struct ContentView: View {
     @ViewBuilder
     private var screenView: some View {
         switch store.screen {
+        case .home:
+            HomeView()
         case .start:
             StartView()
         case .camera:

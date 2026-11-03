@@ -11,6 +11,7 @@ struct Shot11App: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(camera)
+                .onAppear { store.camera = camera }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active && store.screen.usesCamera {
                         camera.start()
