@@ -9,7 +9,7 @@ struct StartView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                store.screen = .home
+                store.screen = (store.currentFolderId == nil) ? .home : .folder
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.left")

@@ -8,6 +8,7 @@ struct ContentView: View {
         ZStack {
             Theme.bg.ignoresSafeArea()
             screenView
+            busyView
             toastView
         }
         .preferredColorScheme(.dark)
@@ -21,15 +22,43 @@ struct ContentView: View {
     private var screenView: some View {
         switch store.screen {
         case .home:
-            HomeView()
+            LibraryView(folderId: nil)
+        case .folder:
+            LibraryView(folderId: store.currentFolderId)
         case .start:
             StartView()
         case .camera:
             CameraView()
+        case .defect:
+            DefectView()
         case .adjust(let i):
             AdjustView(idx: i)
         case .recap:
             RecapView()
+        case .settings:
+            SettingsView()
+        }
+    }
+
+    @ViewBuilder
+    private var busyView: some View {
+        if store.busy || store.processing != nil || store.exporting {
+            VStack {
+                HStack(spacing: 10) {
+                    ProgressView().tint(Theme.fg)
+                    Text(store.processing ?? (store.exporting ? "Préparation de l’export…" : "Traitement…"))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(Theme.fg)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Theme.surface)
+                .overlay(Capsule().stroke(Theme.line, lineWidth: 1))
+                .clipShape(Capsule())
+                .padding(.top, 8)
+                Spacer()
+            }
+            .allowsHitTesting(false)
         }
     }
 
@@ -55,6 +84,7 @@ struct ContentView: View {
 
 struct TopBar: View {
     let number: Int
+    let total: Int
     let title: String
     let ref: String
 
@@ -63,7 +93,7 @@ struct TopBar: View {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text("\(number)")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("/11")
+                Text("/\(total)")
                     .font(.system(size: 15, design: .rounded))
                     .foregroundColor(Theme.muted)
             }

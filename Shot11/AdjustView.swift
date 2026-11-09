@@ -6,14 +6,14 @@ struct AdjustView: View {
     @State private var dragBase: CropBox? = nil
     @State private var pinchBase: CGFloat? = nil
 
-    private var isAuto: Bool { store.defs[idx].auto }
+    private var isAuto: Bool { Steps.isAuto(idx) }
 
     var body: some View {
         GeometryReader { geo in
             let extra: CGFloat = (idx == 0) ? 50 : 0
             let side = max(200, min(geo.size.width - 28, geo.size.height - 290 - extra))
             VStack(spacing: 0) {
-                TopBar(number: idx + 1, title: "Cadrage · " + store.defs[idx].title, ref: store.ref)
+                TopBar(number: store.displayNumber(idx), total: store.requiredCount, title: "Cadrage · " + store.defs[idx].title, ref: store.ref)
                 stage(side: side)
                     .padding(.top, 6)
                 Text(helpText)

@@ -17,6 +17,7 @@ targets:
         NSCameraUsageDescription: "Shot11 utilise la caméra pour photographier tes vêtements. Les photos restent sur ton iPhone."
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        NSPhotoLibraryAddUsageDescription: "Shot11 peut enregistrer tes photos dans la pellicule si tu choisis d’exporter sans ZIP."
         UIRequiresFullScreen: true
         ITSAppUsesNonExemptEncryption: false
     settings:

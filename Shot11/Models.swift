@@ -7,12 +7,22 @@ struct CropBox {
     var side: CGFloat
 }
 
+/// Cadre de recadrage exprimé en fraction de l'image d'origine (indépendant de sa taille).
+struct NBox: Codable {
+    var x: Double
+    var y: Double
+    var side: Double
+}
+
 enum Screen: Equatable {
     case home
+    case folder
     case start
     case camera
+    case defect
     case adjust(Int)
     case recap
+    case settings
 
     var usesCamera: Bool {
         switch self {
@@ -29,18 +39,17 @@ enum Garment: String, Codable, CaseIterable {
     var label: String { self == .top ? "Haut" : "Pantalon" }
 }
 
-/// Cadre de recadrage exprimé en fraction de l'image d'origine (indépendant de sa taille).
-struct NBox: Codable {
-    var x: Double
-    var y: Double
-    var side: Double
-}
-
 enum ExportMode: String, CaseIterable {
     case folderPerRef
     case flat
 
     var label: String { self == .folderPerRef ? "Un dossier par réf" : "Un seul dossier" }
+}
+
+struct Folder: Codable, Identifiable {
+    var id: String
+    var name: String
+    var created: Date
 }
 
 struct Article: Codable, Identifiable {
@@ -50,10 +59,15 @@ struct Article: Codable, Identifiable {
     var created: Date
     var wb: [Float]? = nil
     var boxes: [String: NBox]? = nil
+    var defect: Bool? = nil        // nil = pas encore demandé, true = photo du défaut, false = aucun défaut
+    var folderId: String? = nil
+    var bg: Bool? = nil            // fond uniforme appliqué aux photos
+    var ver: Int? = nil
+
+    var needed: Int { defect == false ? 12 : 13 }
 }
 
 struct StepDef {
-    var file: String
     var title: String
     var short: String
     var symbol: String
@@ -67,42 +81,47 @@ struct StepDef {
 }
 
 enum Steps {
-    /// Numéro de photo sur deux chiffres : 01 ... 11
-    static func number(_ i: Int) -> String {
-        String(format: "%02d", i + 1)
-    }
+    static let count = 13
+    static let defectIndex = 11
+    static let skuIndex = 12
 
-    static let files: [String] = [
-        "01_face.jpg", "02_zoom_haut_gauche.jpg", "03_zoom_bas_gauche.jpg", "04_zoom_bas_droit.jpg",
-        "05_zoom_haut_droit.jpg", "06_etiquette_marque.jpg", "07_etiquette_composition.jpg", "08_dos.jpg",
-        "09_mesure_longueur.jpg", "10_mesure_largeur.jpg", "11_ref_stock.jpg"
-    ]
+    static func isAuto(_ i: Int) -> Bool { i >= 1 && i <= 4 }
+
+    /// Numéro de la photo dans le nom de fichier : sans photo de défaut, le SKU est la n°12.
+    static func exportNumber(_ i: Int, defect: Bool?) -> Int {
+        if i == skuIndex && defect != true { return 12 }
+        return i + 1
+    }
 
     static func defs(_ g: Garment) -> [StepDef] {
         let bottom = (g == .bottom)
         let sil = bottom ? 2 : 1
         let item = bottom ? "Pantalon" : "Vêtement"
-        return [
-            StepDef(file: files[0], title: "Face", short: "Face", symbol: bottom ? "rectangle.portrait" : "tshirt",
-                    caption: item + " entier, à plat, centré dans la silhouette.", crop: true, silhouette: sil),
-            StepDef(file: files[1], title: "Zoom haut gauche", short: "Haut gauche", symbol: "tshirt", auto: true, fx: 0, fy: 0),
-            StepDef(file: files[2], title: "Zoom bas gauche", short: "Bas gauche", symbol: "tshirt", auto: true, fx: 0, fy: 1),
-            StepDef(file: files[3], title: "Zoom bas droit", short: "Bas droit", symbol: "tshirt", auto: true, fx: 1, fy: 1),
-            StepDef(file: files[4], title: "Zoom haut droit", short: "Haut droit", symbol: "tshirt", auto: true, fx: 1, fy: 0),
-            StepDef(file: files[5], title: "Étiquette marque", short: "Marque", symbol: "tag",
-                    caption: bottom ? "Marque et taille bien lisibles (ceinture intérieure)." : "Col ouvert : marque et taille bien lisibles. Touche l’écran pour la netteté."),
-            StepDef(file: files[6], title: "Étiquette composition", short: "Composition", symbol: "doc.text",
-                    caption: "Étiquette de composition. Touche l’écran pour la netteté, ou zoome."),
-            StepDef(file: files[7], title: "Dos", short: "Dos", symbol: bottom ? "rectangle.portrait" : "arrow.triangle.2.circlepath",
-                    caption: item + " retourné, entier, centré dans la silhouette.", crop: true, silhouette: sil),
-            StepDef(file: files[8], title: "Mesure longueur", short: "Longueur", symbol: "ruler",
-                    caption: bottom ? "Mètre de la ceinture jusqu’au bas de la jambe, bien droit." : "Mètre du col jusqu’en bas, bien droit.",
-                    rotation: 90),
-            StepDef(file: files[9], title: "Mesure largeur", short: "Largeur", symbol: "ruler",
-                    caption: bottom ? "Mètre sur la ceinture, d’un bord à l’autre, à plat." : "Mètre d’une aisselle à l’autre, à plat."),
-            StepDef(file: files[10], title: "Référence stock", short: "Réf. stock", symbol: "number",
-                    caption: "Étiquette de stock, bien lisible.")
-        ]
+        var a: [StepDef] = []
+        a.append(StepDef(title: "Face", short: "Face", symbol: bottom ? "rectangle.portrait" : "tshirt",
+                         caption: item + " entier, à plat, centré dans la silhouette.", crop: true, silhouette: sil))
+        a.append(StepDef(title: "Zoom haut gauche", short: "Haut gauche", symbol: "tshirt", auto: true, fx: 0, fy: 0))
+        a.append(StepDef(title: "Zoom bas gauche", short: "Bas gauche", symbol: "tshirt", auto: true, fx: 0, fy: 1))
+        a.append(StepDef(title: "Zoom bas droit", short: "Bas droit", symbol: "tshirt", auto: true, fx: 1, fy: 1))
+        a.append(StepDef(title: "Zoom haut droit", short: "Haut droit", symbol: "tshirt", auto: true, fx: 1, fy: 0))
+        a.append(StepDef(title: "Logo", short: "Logo", symbol: "star.circle",
+                         caption: "Logo de la marque, de près. Touche l’écran pour la netteté."))
+        a.append(StepDef(title: "Étiquette marque", short: "Marque", symbol: "tag",
+                         caption: bottom ? "Marque et taille bien lisibles (ceinture intérieure)." : "Col ouvert : marque et taille bien lisibles. Touche l’écran pour la netteté."))
+        a.append(StepDef(title: "Étiquette composition", short: "Composition", symbol: "doc.text",
+                         caption: "Étiquette de composition. Touche l’écran pour la netteté, ou zoome."))
+        a.append(StepDef(title: "Dos", short: "Dos", symbol: bottom ? "rectangle.portrait" : "arrow.triangle.2.circlepath",
+                         caption: item + " retourné, entier, centré dans la silhouette.", crop: true, silhouette: sil))
+        a.append(StepDef(title: "Mesure longueur", short: "Longueur", symbol: "ruler",
+                         caption: bottom ? "Mètre de la ceinture jusqu’au bas de la jambe, bien droit." : "Mètre du col jusqu’en bas, bien droit.",
+                         rotation: 90))
+        a.append(StepDef(title: "Mesure largeur", short: "Largeur", symbol: "ruler",
+                         caption: bottom ? "Mètre sur la ceinture, d’un bord à l’autre, à plat." : "Mètre d’une aisselle à l’autre, à plat."))
+        a.append(StepDef(title: "Défaut", short: "Défaut", symbol: "exclamationmark.triangle",
+                         caption: "Le défaut (trou, tache, usure), de près. Touche l’écran pour la netteté."))
+        a.append(StepDef(title: "Référence stock", short: "Réf. stock", symbol: "number",
+                         caption: "Étiquette de stock, bien lisible."))
+        return a
     }
 }
 
@@ -114,11 +133,13 @@ enum Theme {
     static let muted = Color(red: 0.6, green: 0.612, blue: 0.651)
     static let accent = Color(red: 0.357, green: 0.486, blue: 1.0)
     static let ok = Color(red: 0.435, green: 0.827, blue: 0.604)
+    static let danger = Color(red: 1.0, green: 0.42, blue: 0.42)
 }
 
 struct PrimaryButton: ButtonStyle {
     var ghost: Bool = false
     var height: CGFloat = 56
+    var danger: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -126,7 +147,7 @@ struct PrimaryButton: ButtonStyle {
             .frame(maxWidth: .infinity)
             .frame(height: height)
             .background(ghost ? Theme.surface : Theme.accent)
-            .foregroundColor(ghost ? Theme.fg : Color.white)
+            .foregroundColor(danger ? Theme.danger : (ghost ? Theme.fg : Color.white))
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .opacity(configuration.isPressed ? 0.8 : 1)
     }
@@ -170,5 +191,18 @@ struct ExportModePicker: View {
             }
         }
         .pickerStyle(.segmented)
+    }
+}
+
+/// Fenêtre de partage iOS (enregistrer dans Fichiers, AirDrop, Photos…).
+enum ShareSheet {
+    static func present(_ items: [Any]) {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first,
+              let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first,
+              var top = window.rootViewController else { return }
+        while let p = top.presentedViewController { top = p }
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        top.present(vc, animated: true)
     }
 }

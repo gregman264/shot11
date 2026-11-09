@@ -66,7 +66,7 @@ struct CameraView: View {
         GeometryReader { geo in
             let side = max(200, min(geo.size.width - 28, geo.size.height - 300))
             VStack(spacing: 0) {
-                TopBar(number: store.step + 1, title: store.defs[store.step].title, ref: store.ref)
+                TopBar(number: store.displayNumber(store.step), total: store.requiredCount, title: store.defs[store.step].title, ref: store.ref)
                 viewfinder(side: side)
                     .padding(.top, 6)
                 Text(store.defs[store.step].caption)
@@ -253,15 +253,15 @@ struct CameraView: View {
 
     private var strip: some View {
         HStack(spacing: 3) {
-            ForEach(0..<11, id: \.self) { i in
+            ForEach(0..<Steps.count, id: \.self) { i in
                 Button { store.tapStep(i) } label: {
                     ZStack {
                         Theme.surface
                         if let t = store.thumbs[i] {
                             Image(uiImage: t).resizable().scaledToFill()
                         } else {
-                            Text("\(i + 1)")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            Text(stripLabel(i))
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundColor(Theme.muted)
                         }
                     }
@@ -271,12 +271,17 @@ struct CameraView: View {
                         RoundedRectangle(cornerRadius: 5)
                             .stroke(i == store.step ? Theme.accent : Color.clear, lineWidth: 2)
                     )
-                    .opacity((store.defs[i].auto && store.thumbs[i] == nil) ? 0.45 : 1)
+                    .opacity(((Steps.isAuto(i) || (i == Steps.defectIndex && store.current?.defect == false)) && store.thumbs[i] == nil) ? 0.45 : 1)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 14)
+    }
+
+    private func stripLabel(_ i: Int) -> String {
+        if i == Steps.defectIndex && store.current?.defect == false { return "–" }
+        return String(i + 1)
     }
 
     // MARK: Actions
